@@ -1,0 +1,159 @@
+name: "Gitleaks secrets scan"
+description: "Run Gitleaks to detect hardcoded secrets; does not print secret values in logs"
+
+outputs:
+  secret_count:
+    description: "Number of findings reported by Gitleaks"
+    value: ${{ steps.gitleaks.outputs.secret_count }}
+  scan_status:
+    description: "Final scan status (clean, findings_found, scanner_error)"
+    value: ${{ steps.gitleaks.outputs.scan_status }}
+
+inputs:
+  gitleaks_version:
+    description: "Exact Gitleaks release version (no v prefix)"
+    required: false
+    default: "8.18.4"
+
+  working_directory:
+    description: "Directory to scan (repo root relative). With no_git=false (default), this must be a git repository. With no_git=true, a plain directory tree is enough."
+    required: false
+    default: "."
+
+  config_path:
+    description: "Optional Gitleaks config path relative to working_directory (e.g. .gitleaks.toml)"
+    required: false
+    default: ""
+
+  baseline_path:
+    description: "Optional baseline report path relative to working_directory (existing findings ignored)"
+    required: false
+    default: ""
+
+  no_git:
+    description: "If true, scan files only (--no-git) instead of git history"
+    required: false
+    default: "false"
+
+  fail_on_findings:
+    description: "Fail the action when one or more findings are reported"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${{ inputs.fail_on_findings }}" in
+          true|false) ;;
+          *)
+            echo "Unsupported fail_on_findings: ${{ inputs.fail_on_findings }}. Use true or false." >&2
+            exit 1
+            ;;
+        esac
+        case "${{ inputs.no_git }}" in
+          true|false) ;;
+          *)
+            echo "Unsupported no_git: ${{ inputs.no_git }}. Use true or false." >&2
+            exit 1
+            ;;
+        esac
+
+    - name: Install Gitleaks
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ inputs.gitleaks_version }}"
+        curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
+        tar -xzf /tmp/gitleaks.tgz -C /tmp
+        chmod +x /tmp/gitleaks
+        /tmp/gitleaks version
+
+    - name: Run Gitleaks
+      id: gitleaks
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        set -euo pipefail
+
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "jq is required but was not found on PATH (install jq on self-hosted runners)." >&2
+          exit 1
+        fi
+
+        report="$(mktemp)"
+        cleanup() { rm -f "$report"; }
+        trap cleanup EXIT
+
+        # Exit 0 even when leaks exist so we only gate on secret_count + fail_on_findings (not Gitleaks' exit convention).
+        ARGS=( detect --source . --report-format json --report-path "$report" --exit-code 0 --redact --no-banner )
+
+        if [ "${{ inputs.no_git }}" = "true" ]; then
+          ARGS+=( --no-git )
+        fi
+
+        if [ -n "${{ inputs.config_path }}" ]; then
+          if [ ! -f "${{ inputs.config_path }}" ]; then
+            echo "Gitleaks config not found: ${{ inputs.config_path }}" >&2
+            exit 1
+          fi
+          ARGS+=( -c "${{ inputs.config_path }}" )
+        fi
+
+        if [ -n "${{ inputs.baseline_path }}" ]; then
+          if [ ! -f "${{ inputs.baseline_path }}" ]; then
+            echo "Gitleaks baseline not found: ${{ inputs.baseline_path }}" >&2
+            exit 1
+          fi
+          ARGS+=( --baseline-path "${{ inputs.baseline_path }}" )
+        fi
+
+        set +e
+        /tmp/gitleaks "${ARGS[@]}"
+        gl_code=$?
+        set -e
+
+        secret_count=0
+        if [ -s "$report" ]; then
+          secret_count="$(jq 'if type == "array" then length else 0 end' "$report" 2>/dev/null || echo 0)"
+        fi
+
+        if [ "$gl_code" -eq 126 ]; then
+          echo "scan_status=scanner_error" >> "$GITHUB_OUTPUT"
+          echo "secret_count=0" >> "$GITHUB_OUTPUT"
+          echo "Gitleaks failed with exit 126 (e.g. invalid flags)." >&2
+          exit 126
+        fi
+
+        if [ "$gl_code" -ne 0 ]; then
+          echo "scan_status=scanner_error" >> "$GITHUB_OUTPUT"
+          echo "secret_count=0" >> "$GITHUB_OUTPUT"
+          echo "Gitleaks exited with code ${gl_code} (scanner or environment error)." >&2
+          exit "${gl_code}"
+        fi
+
+        if [ "$secret_count" -gt 0 ]; then
+          echo "scan_status=findings_found" >> "$GITHUB_OUTPUT"
+        else
+          echo "scan_status=clean" >> "$GITHUB_OUTPUT"
+        fi
+        echo "secret_count=${secret_count}" >> "$GITHUB_OUTPUT"
+
+        if [ "$secret_count" -gt 0 ]; then
+          echo "Gitleaks reported ${secret_count} finding(s). Rule, file, and line only (values are not printed):" >&2
+          jq -r '.[] | "  \(.RuleID // "unknown")  \(.File // "?"):\(.StartLine // "?")"' "$report" 2>/dev/null | head -20 >&2 || true
+          if [ "$secret_count" -gt 20 ]; then
+            echo "  ... output truncated (20 of ${secret_count} findings); see JSON report locally or use Gitleaks SARIF/artifact upload if needed." >&2
+          fi
+        else
+          echo "No secrets reported by Gitleaks." >&2
+        fi
+
+        if [ "${{ inputs.fail_on_findings }}" = "true" ] && [ "$secret_count" -gt 0 ]; then
+          exit 1
+        fi
+
+        exit 0
