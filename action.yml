@@ -67,8 +67,10 @@ runs:
       run: |
         set -euo pipefail
         VERSION="${{ inputs.gitleaks_version }}"
-        curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
+        # -f: fail on HTTP errors (avoid silently using a partial/empty tarball).
+        curl -fSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
         tar -xzf /tmp/gitleaks.tgz -C /tmp
+        rm -f /tmp/gitleaks.tgz
         chmod +x /tmp/gitleaks
         /tmp/gitleaks version
 
