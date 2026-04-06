@@ -50,13 +50,16 @@ Use instead:
 | `baseline_path` | *(empty)* | Optional baseline report relative to `working_directory`. |
 | `no_git` | `false` | Set `true` for filesystem-only scan (`--no-git`). |
 | `fail_on_findings` | `true` | If `true`, exit 1 when `secret_count > 0`. |
+| `write_sarif` | `false` | If `true`, write **SARIF 2.1** to **`sarif_filename`** (for **`github/codeql-action/upload-sarif`**). When `false`, findings are counted from **JSON** internally (no SARIF file). |
+| `sarif_filename` | `gitleaks-results.sarif` | Path relative to **`working_directory`** (used when **`write_sarif`** is `true`). |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
-| `secret_count` | Number of secret findings in the JSON report. |
+| `secret_count` | Number of secret findings (from JSON internally, or from SARIF when **`write_sarif`** is `true`). |
 | `scan_status` | `clean`, `findings_found`, or `scanner_error`. |
+| `sarif_path` | Repo-relative path to the SARIF file when **`write_sarif`** is `true`; empty otherwise. |
 
 ## Example
 

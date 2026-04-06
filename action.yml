@@ -8,6 +8,9 @@ outputs:
   scan_status:
     description: "Final scan status (clean, findings_found, scanner_error)"
     value: ${{ steps.gitleaks.outputs.scan_status }}
+  sarif_path:
+    description: "Repo-relative path to the SARIF report when write_sarif is true (empty otherwise)"
+    value: ${{ steps.gitleaks.outputs.sarif_path }}
 
 inputs:
   gitleaks_version:
@@ -40,6 +43,16 @@ inputs:
     required: false
     default: "true"
 
+  write_sarif:
+    description: "Write a SARIF 2.1 report to sarif_filename (for GitHub Code Scanning upload)"
+    required: false
+    default: "false"
+
+  sarif_filename:
+    description: "SARIF file path relative to working_directory (used when write_sarif is true)"
+    required: false
+    default: "gitleaks-results.sarif"
+
 runs:
   using: "composite"
   steps:
@@ -58,6 +71,13 @@ runs:
           true|false) ;;
           *)
             echo "Unsupported no_git: ${{ inputs.no_git }}. Use true or false." >&2
+            exit 1
+            ;;
+        esac
+        case "${{ inputs.write_sarif }}" in
+          true|false) ;;
+          *)
+            echo "Unsupported write_sarif: ${{ inputs.write_sarif }}. Use true or false." >&2
             exit 1
             ;;
         esac
@@ -100,12 +120,22 @@ runs:
           exit 1
         fi
 
-        report="$(mktemp)"
-        cleanup() { rm -f "$report"; }
-        trap cleanup EXIT
+        WRITE_SARIF="${{ inputs.write_sarif }}"
+        SARIF_NAME="${{ inputs.sarif_filename }}"
+
+        if [ "$WRITE_SARIF" = "true" ]; then
+          report="${SARIF_NAME}"
+          trap '' EXIT
+          FORMAT="sarif"
+        else
+          report="$(mktemp)"
+          cleanup() { rm -f "$report"; }
+          trap cleanup EXIT
+          FORMAT="json"
+        fi
 
         # Exit 0 even when leaks exist so we only gate on secret_count + fail_on_findings (not Gitleaks' exit convention).
-        ARGS=( detect --source . --report-format json --report-path "$report" --exit-code 0 --redact --no-banner )
+        ARGS=( detect --source . --report-format "$FORMAT" --report-path "$report" --exit-code 0 --redact --no-banner )
 
         if [ "${{ inputs.no_git }}" = "true" ]; then
           ARGS+=( --no-git )
@@ -133,11 +163,18 @@ runs:
         set -e
 
         secret_count=0
-        if [ -s "$report" ]; then
-          secret_count="$(jq 'if type == "array" then length else 0 end' "$report" 2>/dev/null || echo 0)"
+        if [ "$WRITE_SARIF" = "true" ]; then
+          if [ -s "$report" ]; then
+            secret_count="$(jq '[.runs[]?.results[]?] | length // 0' "$report" 2>/dev/null || echo 0)"
+          fi
+        else
+          if [ -s "$report" ]; then
+            secret_count="$(jq 'if type == "array" then length else 0 end' "$report" 2>/dev/null || echo 0)"
+          fi
         fi
 
         if [ "$gl_code" -eq 126 ]; then
+          echo "sarif_path=" >> "$GITHUB_OUTPUT"
           echo "scan_status=scanner_error" >> "$GITHUB_OUTPUT"
           echo "secret_count=0" >> "$GITHUB_OUTPUT"
           echo "Gitleaks failed with exit 126 (e.g. invalid flags)." >&2
@@ -145,10 +182,22 @@ runs:
         fi
 
         if [ "$gl_code" -ne 0 ]; then
+          echo "sarif_path=" >> "$GITHUB_OUTPUT"
           echo "scan_status=scanner_error" >> "$GITHUB_OUTPUT"
           echo "secret_count=0" >> "$GITHUB_OUTPUT"
           echo "Gitleaks exited with code ${gl_code} (scanner or environment error)." >&2
           exit "${gl_code}"
+        fi
+
+        WD="${{ inputs.working_directory }}"
+        if [ "$WRITE_SARIF" = "true" ]; then
+          if [ "$WD" = "." ]; then
+            echo "sarif_path=${SARIF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sarif_path=${WD}/${SARIF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo "sarif_path=" >> "$GITHUB_OUTPUT"
         fi
 
         if [ "$secret_count" -gt 0 ]; then
@@ -160,9 +209,13 @@ runs:
 
         if [ "$secret_count" -gt 0 ]; then
           echo "Gitleaks reported ${secret_count} finding(s). Rule, file, and line only (values are not printed):" >&2
-          jq -r '.[] | "  \(.RuleID // "unknown")  \(.File // "?"):\(.StartLine // "?")"' "$report" 2>/dev/null | head -20 >&2 || true
+          if [ "$WRITE_SARIF" = "true" ]; then
+            jq -r '.runs[]?.results[]? | "  \(.ruleId // "unknown")  \(.locations[0].physicalLocation.artifactLocation.uri // "?"):\(.locations[0].physicalLocation.region.startLine // "?")"' "$report" 2>/dev/null | head -20 >&2 || true
+          else
+            jq -r '.[] | "  \(.RuleID // "unknown")  \(.File // "?"):\(.StartLine // "?")"' "$report" 2>/dev/null | head -20 >&2 || true
+          fi
           if [ "$secret_count" -gt 20 ]; then
-            echo "  ... output truncated (20 of ${secret_count} findings); see JSON report locally or use Gitleaks SARIF/artifact upload if needed." >&2
+            echo "  ... output truncated (20 of ${secret_count} findings); see SARIF in Code Scanning or the report file." >&2
           fi
         else
           echo "No secrets reported by Gitleaks." >&2
