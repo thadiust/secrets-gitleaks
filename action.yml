@@ -67,10 +67,24 @@ runs:
       run: |
         set -euo pipefail
         VERSION="${{ inputs.gitleaks_version }}"
-        # -f: fail on HTTP errors (avoid silently using a partial/empty tarball).
-        curl -fSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
-        tar -xzf /tmp/gitleaks.tgz -C /tmp
-        rm -f /tmp/gitleaks.tgz
+        ASSET="gitleaks_${VERSION}_linux_x64.tar.gz"
+        BASE_URL="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}"
+        # Upstream publishes checksums next to tarballs; verify SHA256 before extract (TLS + `-f` is not enough for binary integrity).
+        curl -fSL "${BASE_URL}/gitleaks_${VERSION}_checksums.txt" -o /tmp/gitleaks_checksums.txt
+        curl -fSL "${BASE_URL}/${ASSET}" -o "/tmp/${ASSET}"
+        EXPECTED="$(awk -v f="${ASSET}" '$2 == f { print $1; exit }' /tmp/gitleaks_checksums.txt)"
+        if [ -z "${EXPECTED}" ]; then
+          echo "No SHA256 line for ${ASSET} in upstream checksums (wrong gitleaks_version or renamed asset?)." >&2
+          exit 1
+        fi
+        ACTUAL="$(sha256sum "/tmp/${ASSET}" | awk '{ print $1 }')"
+        if [ "${EXPECTED}" != "${ACTUAL}" ]; then
+          echo "SHA256 mismatch for ${ASSET} (expected ${EXPECTED}, got ${ACTUAL})." >&2
+          exit 1
+        fi
+        rm -f /tmp/gitleaks_checksums.txt
+        tar -xzf "/tmp/${ASSET}" -C /tmp
+        rm -f "/tmp/${ASSET}"
         chmod +x /tmp/gitleaks
         /tmp/gitleaks version
 

@@ -8,8 +8,8 @@ Composite GitHub Action that runs [Gitleaks](https://github.com/gitleaks/gitleak
 
 ## Caller responsibilities
 
-- Run on **`ubuntu-latest`** (Linux x64 binary). **`jq`** must be available (included on GitHub-hosted runners; install it on self-hosted runners).
-- The action downloads the official Gitleaks release tarball with **`curl -fSL`** (HTTP failures do not leave a bogus binary). For maximum supply-chain assurance, pin **`gitleaks_version`** and verify the release **checksum** from the upstream project if your policy requires it (not automated in this action today).
+- Run on **`ubuntu-latest`** (Linux **x64** tarball `gitleaks_*_linux_x64.tar.gz`). **`jq`** must be available (included on GitHub-hosted runners; install it on self-hosted runners).
+- The action downloads **`gitleaks_${VERSION}_checksums.txt`** from the same release, looks up the SHA256 for the Linux x64 archive, compares it to **`sha256sum`** of the downloaded tarball, then extracts. Pin **`gitleaks_version`** to the release you intend; a mismatch or tampered file fails the install step.
 - **`actions/checkout`** must run **before** this action. For **full git history** scans, use `fetch-depth: 0` on checkout; shallow clones limit what Gitleaks can see in history.
 - With default **`no_git: false`**, `working_directory` must be a **git** checkout. With **`no_git: true`**, a normal directory tree is enough.
 
