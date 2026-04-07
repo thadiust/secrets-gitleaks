@@ -1,4 +1,5 @@
 name: actionlint
+
 on:
   push:
     branches: [main]
@@ -9,27 +10,6 @@ permissions:
 
 jobs:
   actionlint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install actionlint
-        run: |
-          set -euo pipefail
-          v=1.7.12
-          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${v}/actionlint_${v}_linux_amd64.tar.gz" -o /tmp/actionlint.tgz
-          tar -xzf /tmp/actionlint.tgz -C /tmp
-          sudo install -m755 /tmp/actionlint /usr/local/bin/actionlint
-
-      - name: Lint workflow YAML
-        run: actionlint -color
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Validate action.yml parses
-        run: |
-          set -euo pipefail
-          python -m pip install pyyaml
-          python -c "import yaml; yaml.safe_load(open('action.yml'))"
+    uses: thadiust/workflow-python/.github/workflows/reusable-actionlint.yml@v1.0.7
+    with:
+      validate_root_action_yml: true
