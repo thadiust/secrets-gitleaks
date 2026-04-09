@@ -68,7 +68,7 @@ Use instead:
   with:
     fetch-depth: 0
 
-- uses: thadiust/secrets-gitleaks@main
+- uses: thadiust/secrets-gitleaks@v1.0.2
   with:
     working_directory: "."
     fail_on_findings: true

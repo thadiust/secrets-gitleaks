@@ -4,6 +4,12 @@ All notable changes to **secrets-gitleaks** are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-04-09
+
+### Changed
+
+- Stricter validation of **`working_directory`**, **`config_path`**, **`baseline_path`**, and **`sarif_filename`** (reject absolute paths and `..` segments).
+
 ## [1.0.2] — 2026-04-06
 
 ### Added

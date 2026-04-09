@@ -60,6 +60,26 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        WD="${{ inputs.working_directory }}"
+        if [ -z "$WD" ]; then
+          echo "working_directory must be a non-empty relative path." >&2
+          exit 1
+        fi
+        case "$WD" in
+          /*)
+            echo "working_directory must be relative (no leading slash): $WD" >&2
+            exit 1
+            ;;
+        esac
+        if [[ "$WD" =~ (^|/)\.\.(/|$) ]]; then
+          echo "working_directory must not traverse parents (..): $WD" >&2
+          exit 1
+        fi
+        if [ ! -d "$GITHUB_WORKSPACE/$WD" ]; then
+          echo "working_directory not found or not a directory: $WD" >&2
+          exit 1
+        fi
+
         case "${{ inputs.fail_on_findings }}" in
           true|false) ;;
           *)
@@ -81,6 +101,58 @@ runs:
             exit 1
             ;;
         esac
+
+        CONFIG_PATH="${{ inputs.config_path }}"
+        if [ -n "$CONFIG_PATH" ]; then
+          case "$CONFIG_PATH" in
+            /*)
+              echo "config_path must be relative (no leading slash): $CONFIG_PATH" >&2
+              exit 1
+              ;;
+          esac
+          if [[ "$CONFIG_PATH" =~ (^|/)\.\.(/|$) ]]; then
+            echo "config_path must not traverse parents (..): $CONFIG_PATH" >&2
+            exit 1
+          fi
+          if [ ! -f "$GITHUB_WORKSPACE/$WD/$CONFIG_PATH" ]; then
+            echo "Gitleaks config not found: $WD/$CONFIG_PATH" >&2
+            exit 1
+          fi
+        fi
+
+        BASELINE_PATH="${{ inputs.baseline_path }}"
+        if [ -n "$BASELINE_PATH" ]; then
+          case "$BASELINE_PATH" in
+            /*)
+              echo "baseline_path must be relative (no leading slash): $BASELINE_PATH" >&2
+              exit 1
+              ;;
+          esac
+          if [[ "$BASELINE_PATH" =~ (^|/)\.\.(/|$) ]]; then
+            echo "baseline_path must not traverse parents (..): $BASELINE_PATH" >&2
+            exit 1
+          fi
+          if [ ! -f "$GITHUB_WORKSPACE/$WD/$BASELINE_PATH" ]; then
+            echo "Gitleaks baseline not found: $WD/$BASELINE_PATH" >&2
+            exit 1
+          fi
+        fi
+
+        SARIF_NAME="${{ inputs.sarif_filename }}"
+        if [ -z "$SARIF_NAME" ]; then
+          echo "sarif_filename must be non-empty (use write_sarif=false to skip SARIF)." >&2
+          exit 1
+        fi
+        case "$SARIF_NAME" in
+          /*)
+            echo "sarif_filename must be relative (no leading slash): $SARIF_NAME" >&2
+            exit 1
+            ;;
+        esac
+        if [[ "$SARIF_NAME" =~ (^|/)\.\.(/|$) ]]; then
+          echo "sarif_filename must not traverse parents (..): $SARIF_NAME" >&2
+          exit 1
+        fi
 
     - name: Install Gitleaks
       shell: bash
@@ -124,8 +196,8 @@ runs:
         SARIF_NAME="${{ inputs.sarif_filename }}"
 
         if [ "$WRITE_SARIF" = "true" ]; then
+          # SARIF is written into the working tree for upload / Code Scanning — not a temp file; no EXIT trap.
           report="${SARIF_NAME}"
-          trap '' EXIT
           FORMAT="sarif"
         else
           report="$(mktemp)"
