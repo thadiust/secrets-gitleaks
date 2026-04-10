@@ -199,6 +199,9 @@ runs:
           # SARIF is written into the working tree for upload / Code Scanning — not a temp file; no EXIT trap.
           report="${SARIF_NAME}"
           FORMAT="sarif"
+          if [[ "$report" == */* ]]; then
+            mkdir -p "$(dirname -- "$report")"
+          fi
         else
           report="$(mktemp)"
           cleanup() { rm -f "$report"; }
