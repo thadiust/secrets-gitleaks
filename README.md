@@ -12,6 +12,7 @@ Composite GitHub Action that runs [Gitleaks](https://github.com/gitleaks/gitleak
 - The action downloads **`gitleaks_${VERSION}_checksums.txt`** from the same release, looks up the SHA256 for the Linux x64 archive, compares it to **`sha256sum`** of the downloaded tarball, then extracts. Pin **`gitleaks_version`** to the release you intend; a mismatch or tampered file fails the install step.
 - **`actions/checkout`** must run **before** this action. For **full git history** scans, use `fetch-depth: 0` on checkout; shallow clones limit what Gitleaks can see in history.
 - With default **`no_git: false`**, `working_directory` must be a **git** checkout. With **`no_git: true`**, a normal directory tree is enough.
+- Self-hosted runners may require extra care: if `/tmp` is mounted **`noexec`** or your runner image does not include `sha256sum`/`jq`, installation or scanning will fail unless you adjust the runner or fork the action to use a different install location/tooling.
 
 ## Exit behavior
 
@@ -68,7 +69,7 @@ Use instead:
   with:
     fetch-depth: 0
 
-- uses: thadiust/secrets-gitleaks@v1.0.2
+- uses: thadiust/secrets-gitleaks@main
   with:
     working_directory: "."
     fail_on_findings: true
