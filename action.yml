@@ -238,13 +238,23 @@ runs:
         set -e
 
         secret_count=0
-        if [ "$WRITE_SARIF" = "true" ]; then
-          if [ -s "$report" ]; then
-            secret_count="$(jq '[.runs[]?.results[]?] | length // 0' "$report" 2>/dev/null || echo 0)"
-          fi
-        else
-          if [ -s "$report" ]; then
-            secret_count="$(jq 'if type == "array" then length else 0 end' "$report" 2>/dev/null || echo 0)"
+        if [ -s "$report" ]; then
+          if [ "$WRITE_SARIF" = "true" ]; then
+            if ! secret_count="$(jq '[.runs[]?.results[]?] | length // 0' "$report")"; then
+              echo "sarif_path=" >> "$GITHUB_OUTPUT"
+              echo "scan_status=scanner_error" >> "$GITHUB_OUTPUT"
+              echo "secret_count=0" >> "$GITHUB_OUTPUT"
+              echo "Gitleaks report parse error: could not count SARIF findings." >&2
+              exit 2
+            fi
+          else
+            if ! secret_count="$(jq 'if type == "array" then length else 0 end' "$report")"; then
+              echo "sarif_path=" >> "$GITHUB_OUTPUT"
+              echo "scan_status=scanner_error" >> "$GITHUB_OUTPUT"
+              echo "secret_count=0" >> "$GITHUB_OUTPUT"
+              echo "Gitleaks report parse error: could not count JSON findings." >&2
+              exit 2
+            fi
           fi
         fi
 
