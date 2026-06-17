@@ -192,6 +192,13 @@ runs:
           exit 1
         fi
 
+        if [ "${{ inputs.no_git }}" != "true" ]; then
+          if git rev-parse --is-shallow-repository 2>/dev/null | grep -q '^true$'; then
+            echo "Shallow git checkout detected (e.g. fetch-depth: 1). Gitleaks history scan misses older commits — use fetch-depth: 0 on checkout." >&2
+            exit 1
+          fi
+        fi
+
         WRITE_SARIF="${{ inputs.write_sarif }}"
         SARIF_NAME="${{ inputs.sarif_filename }}"
 
@@ -272,6 +279,25 @@ runs:
           echo "secret_count=0" >> "$GITHUB_OUTPUT"
           echo "Gitleaks exited with code ${gl_code} (scanner or environment error)." >&2
           exit "${gl_code}"
+        fi
+
+        if [ "$WRITE_SARIF" = "true" ] && [ -s "$report" ]; then
+          sarif_redacted="$(mktemp)"
+          if ! jq '
+            (.runs[]?.results[]?) |= (
+              if .partialFingerprints then
+                .partialFingerprints |= with_entries(
+                  if (.key | ascii_downcase | test("commit|author|email|message")) then
+                    .value = "[REDACTED]"
+                  else . end
+                )
+              else . end
+            )
+          ' "$report" > "$sarif_redacted"; then
+            echo "Gitleaks SARIF metadata redaction failed." >&2
+            exit 2
+          fi
+          mv "$sarif_redacted" "$report"
         fi
 
         WD="${{ inputs.working_directory }}"
